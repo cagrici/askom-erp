@@ -1,0 +1,18 @@
+/* Custom styles for Todo app */
+.todo-item-text {
+    cursor: pointer;
+    color: #4361ee;
+    text-decoration: none;
+}
+.todo-item-text:hover {
+    text-decoration: underline;
+}
+
+/* Make ReactQuill editor responsive */
+.quill {
+    height: 200px;
+}
+
+.ql-editor {
+    min-height: 150px;
+}

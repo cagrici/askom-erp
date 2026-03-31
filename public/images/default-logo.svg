@@ -1,0 +1,12 @@
+<svg width="120" height="40" viewBox="0 0 120 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="120" height="40" rx="8" fill="#3B82F6"/>
+  
+  <!-- Icon -->
+  <circle cx="20" cy="20" r="8" fill="#FFFFFF"/>
+  <path d="M16 20L19 23L24 17" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Text -->
+  <text x="35" y="16" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#FFFFFF">ŞUKI</text>
+  <text x="35" y="28" font-family="Arial, sans-serif" font-size="8" fill="#E5E7EB">PORTAL</text>
+</svg>

@@ -1,0 +1,1 @@
+import{j as n}from"./bootstrap-B-rMZa0z.js";import{R as e}from"./vendor-CxCRd4AE.js";function s({message:r,className:t="",...a}){return r?n.jsx(e.Fragment,{children:n.jsx("p",{...a,className:"invalid-feedback "+t,children:r})}):null}export{s as I};

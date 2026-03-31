@@ -36,11 +36,15 @@ interface Product {
     name: string;
     code: string;
     sale_price: number;
+    sale_price_try?: number;
+    currency?: string;
     tax_rate?: number;
     stock_quantity: number;
     image_url?: string;
     active_units?: ProductUnit[];
     baseUnit?: Unit;
+    logo_sale_price?: number;
+    logo_currency?: string;
 }
 
 interface OfferItem {
@@ -62,6 +66,8 @@ interface OfferItem {
     total: number;
     image_url?: string;
     product?: Product;
+    original_currency?: string;
+    original_price_in_currency?: number;
 }
 
 interface Offer {
@@ -77,6 +83,7 @@ interface Offer {
     customer_type: string;
     discount_rate: number;
     tax_rate: number;
+    currency_id?: number;
     notes?: string;
     items: any[];
     entity?: {
@@ -86,6 +93,15 @@ interface Offer {
         phone_1?: string;
         email?: string;
         address?: string;
+    };
+}
+
+interface ExchangeRates {
+    [key: string]: {
+        code: string;
+        name: string;
+        rate: number;
+        date: string;
     };
 }
 
@@ -123,6 +139,8 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
             const d2 = Number(item.discount_rate2) || 0;
             const d3 = Number(item.discount_rate3) || 0;
             const taxRate = Number(item.tax_rate) || 20;
+            const productCurrency = item.product?.currency || item.product?.logo_currency || 'TRY';
+            const originalPriceInCurrency = Number(item.product?.sale_price) || price;
             const subtotal = qty * price;
             const afterD1 = subtotal * (1 - d1 / 100);
             const afterD2 = afterD1 * (1 - d2 / 100);
@@ -146,7 +164,9 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                 tax_amount: taxAmount,
                 total: afterD3 + taxAmount,
                 image_url: item.product?.images?.[0]?.image_url,
-                product: item.product
+                product: item.product,
+                original_currency: productCurrency,
+                original_price_in_currency: originalPriceInCurrency,
             };
         })
     });
@@ -171,11 +191,48 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
     const [showProductDropdown, setShowProductDropdown] = useState(false);
     const [editingPrices, setEditingPrices] = useState<{[key: number]: string}>({});
     const [expandedNotes, setExpandedNotes] = useState<Set<number>>(new Set());
+    const [exchangeRates, setExchangeRates] = useState<ExchangeRates>({});
     const productSearchRef = useRef<HTMLDivElement>(null);
 
     // Get selected currency info
     const selectedCurrency = currencies.find((c: any) => c.id === data.currency_id);
     const offerCurrencyCode = selectedCurrency?.cur_code || 'TRY';
+    const getCurrencySymbol = (currencyCode: string) =>
+        currencies.find((c: any) => c.cur_code === currencyCode)?.symbol || `${currencyCode} `;
+    const currencySymbol = selectedCurrency?.symbol || getCurrencySymbol(offerCurrencyCode);
+
+    useEffect(() => {
+        axios.get(route('sales.offers.exchange-rates'))
+            .then(response => {
+                if (response.data.success) {
+                    setExchangeRates(response.data.rates);
+                }
+            })
+            .catch(console.error);
+    }, []);
+
+    const convertPrice = (amount: number, fromCurrency: string, toCurrency: string): number => {
+        if (fromCurrency === toCurrency) return amount;
+        if (!amount) return 0;
+
+        const fromRate = exchangeRates[fromCurrency]?.rate;
+        const toRate = exchangeRates[toCurrency]?.rate;
+
+        if (!fromRate || !toRate) {
+            return amount;
+        }
+
+        if (fromCurrency === 'TRY') {
+            return amount / toRate;
+        }
+
+        if (toCurrency === 'TRY') {
+            return amount * fromRate;
+        }
+
+        const tryAmount = amount * fromRate;
+        return tryAmount / toRate;
+    };
 
     // Döviz seçildiğinde KDV otomatik 0 yap (USD, EUR, GBP vb.)
     useEffect(() => {
@@ -301,7 +358,14 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
         const baseUnit = product.active_units?.find(u => u.is_base_unit);
         const defaultUnitId = baseUnit?.unit_id || product.baseUnit?.id || null;
 
-        const salePrice = product.sale_price || 0;
+        const productCurrency = product.currency || product.logo_currency || 'TRY';
+        const originalPrice = Number(product.sale_price) || 0;
+        const convertedPrice = offerCurrencyCode === 'TRY'
+            && productCurrency !== 'TRY'
+            && Number(product.sale_price_try) > 0
+            ? Number(product.sale_price_try)
+            : convertPrice(originalPrice, productCurrency, offerCurrencyCode);
+        const salePrice = Math.round(convertedPrice * 100) / 100;
         const taxRate = data.tax_rate;
         const taxAmount = salePrice * (taxRate / 100);
 
@@ -321,7 +385,9 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
             tax_amount: taxAmount,
             total: salePrice + taxAmount,
             image_url: product.image_url,
-            product: product
+            product: product,
+            original_currency: productCurrency,
+            original_price_in_currency: originalPrice
         };
         setData('items', [...data.items, newItem]);
         // Liste açık kalsın, birden fazla ürün eklenebilsin
@@ -365,19 +431,28 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
         if (unitId && item.product.active_units) {
             const selectedUnit = item.product.active_units.find(u => u.unit_id === unitId);
             if (selectedUnit) {
+                const productCurrency = item.original_currency || item.product.currency || item.product.logo_currency || 'TRY';
                 // Use unit-specific price if available, otherwise calculate from base price * conversion_factor
                 if (selectedUnit.sale_price > 0) {
-                    updatedItems[index].unit_price = selectedUnit.sale_price;
+                    const convertedPrice = convertPrice(selectedUnit.sale_price, productCurrency, offerCurrencyCode);
+                    updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
                 } else if (selectedUnit.conversion_factor > 0) {
                     // Calculate price based on conversion factor
                     const basePrice = item.product.sale_price || item.product.logo_sale_price || 0;
-                    updatedItems[index].unit_price = basePrice * selectedUnit.conversion_factor;
+                    const convertedPrice = convertPrice(basePrice * selectedUnit.conversion_factor, productCurrency, offerCurrencyCode);
+                    updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
                 }
             }
         } else if (!unitId) {
             // Reset to base price when no unit selected
             const basePrice = item.product.sale_price || item.product.logo_sale_price || 0;
-            updatedItems[index].unit_price = basePrice;
+            const productCurrency = item.original_currency || item.product.currency || item.product.logo_currency || 'TRY';
+            const convertedPrice = offerCurrencyCode === 'TRY'
+                && productCurrency !== 'TRY'
+                && Number(item.product.sale_price_try) > 0
+                ? Number(item.product.sale_price_try)
+                : convertPrice(basePrice, productCurrency, offerCurrencyCode);
+            updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
         }
 
         // Recalculate totals (3 kademeli iskonto)
@@ -708,7 +783,16 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
 
                                             {showProductDropdown && filteredProducts.length > 0 && (
                                                 <div className="border rounded position-absolute w-100 bg-white shadow" style={{ zIndex: 1050, maxHeight: '400px', overflowY: 'auto' }}>
-                                                    {filteredProducts.map(p => (
+                                                    {filteredProducts.map(p => {
+                                                        const productCurrency = p.currency || p.logo_currency || 'TRY';
+                                                        const originalPrice = Number(p.sale_price) || 0;
+                                                        const convertedPrice = offerCurrencyCode === 'TRY'
+                                                            && productCurrency !== 'TRY'
+                                                            && Number(p.sale_price_try) > 0
+                                                            ? Number(p.sale_price_try)
+                                                            : convertPrice(originalPrice, productCurrency, offerCurrencyCode);
+
+                                                        return (
                                                         <div key={p.id} className="p-2 border-bottom hover-bg d-flex align-items-center gap-2" onClick={() => addProduct(p)} style={{ cursor: 'pointer' }}>
                                                             {p.image_url ? (
                                                                 <Image src={p.image_url} rounded style={{ width: '50px', height: '50px', objectFit: 'cover' }} />
@@ -721,12 +805,15 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                                                                 <strong>{p.name}</strong><br />
                                                                 <small className="text-muted d-block mb-1">{p.code}</small>
                                                                 <small className="text-muted">
-                                                                    Fiyat: ₺{p.sale_price}
+                                                                    Fiyat: {getCurrencySymbol(productCurrency)}{fmt(originalPrice)}
+                                                                    {productCurrency !== offerCurrencyCode && (
+                                                                        <>{' -> '}{currencySymbol}{fmt(convertedPrice)}</>
+                                                                    )}
                                                                     <Badge bg="info" className="ms-2">Stok: {p.stock_quantity} | {p.code}</Badge>
                                                                 </small>
                                                             </div>
                                                         </div>
-                                                    ))}
+                                                    )})}
                                                 </div>
                                             )}
                                         </div>
@@ -828,7 +915,7 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                                                                     />
                                                                     {item.original_unit_price && item.unit_price !== item.original_unit_price && (
                                                                         <small className="text-muted d-block mt-1">
-                                                                            <s>₺{fmt(Number(item.original_unit_price))}</s>
+                                                                            <s>{currencySymbol}{fmt(Number(item.original_unit_price))}</s>
                                                                         </small>
                                                                     )}
                                                                 </td>
@@ -841,7 +928,7 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                                                                 <td>
                                                                     <Form.Control size="sm" type="number" step="0.01" min="0" max="100" value={item.discount_rate3} onChange={e => updateItem(idx, 'discount_rate3', parseFloat(e.target.value) || 0)} style={{ width: '60px' }} />
                                                                 </td>
-                                                                <td className="text-end fw-bold">₺{fmt(Number((item.total || 0) - (item.tax_amount || 0)))}</td>
+                                                                <td className="text-end fw-bold">{currencySymbol}{fmt(Number((item.total || 0) - (item.tax_amount || 0)))}</td>
                                                                 <td className="text-center">
                                                                     <Button variant="link" size="sm" className="text-danger p-0" onClick={() => removeItem(idx)}>
                                                                         <i className="ri-delete-bin-line"></i>
@@ -910,38 +997,38 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                                     <Card.Body>
                                         <div className="d-flex justify-content-between mb-1">
                                             <span>Brüt Toplam:</span>
-                                            <strong>₺{fmt(grossTotal)}</strong>
+                                            <strong>{currencySymbol}{fmt(grossTotal)}</strong>
                                         </div>
                                         {itemDiscounts > 0 && (
                                             <div className="d-flex justify-content-between mb-1">
                                                 <span className="text-muted small">Satır İskontolar:</span>
-                                                <span className="text-danger small">-₺{fmt(itemDiscounts)}</span>
+                                                <span className="text-danger small">-{currencySymbol}{fmt(itemDiscounts)}</span>
                                             </div>
                                         )}
                                         <div className="d-flex justify-content-between mb-1">
                                             <span>Ara Toplam:</span>
-                                            <strong>₺{fmt(subtotal)}</strong>
+                                            <strong>{currencySymbol}{fmt(subtotal)}</strong>
                                         </div>
                                         {generalDiscountAmount > 0 && (
                                             <div className="d-flex justify-content-between mb-1">
                                                 <span className="text-muted small">Genel İskonto:</span>
-                                                <span className="text-danger small">-₺{fmt(generalDiscountAmount)}</span>
+                                                <span className="text-danger small">-{currencySymbol}{fmt(generalDiscountAmount)}</span>
                                             </div>
                                         )}
                                         {totalDiscountAmount > 0 && (
                                             <div className="d-flex justify-content-between mb-1">
                                                 <span>Toplam İskonto:</span>
-                                                <strong className="text-danger">-₺{fmt(totalDiscountAmount)}</strong>
+                                                <strong className="text-danger">-{currencySymbol}{fmt(totalDiscountAmount)}</strong>
                                             </div>
                                         )}
                                         <div className="d-flex justify-content-between mb-2">
                                             <span>KDV:</span>
-                                            <strong>₺{fmt(taxAmount)}</strong>
+                                            <strong>{currencySymbol}{fmt(taxAmount)}</strong>
                                         </div>
                                         <hr />
                                         <div className="d-flex justify-content-between">
                                             <h5 className="mb-0">TOPLAM:</h5>
-                                            <h5 className="mb-0 text-primary">₺{fmt(total)}</h5>
+                                            <h5 className="mb-0 text-primary">{currencySymbol}{fmt(total)}</h5>
                                         </div>
                                     </Card.Body>
                                 </Card>

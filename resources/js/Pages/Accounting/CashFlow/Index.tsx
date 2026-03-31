@@ -94,6 +94,42 @@ interface Summary {
     total_checks_payable: number;
     overdue_receivables: number;
     overdue_payables: number;
+    forecast_overdue: number;
+    forecast_this_week: number;
+    forecast_next_4_weeks: number;
+}
+
+interface WeeklyForecastItem {
+    week_key: string;
+    label: string;
+    week_start: string | null;
+    week_end: string | null;
+    receivable_amount: number;
+    check_amount: number;
+    total_expected: number;
+    customer_count: number;
+    is_overdue: boolean;
+    is_current_week: boolean;
+}
+
+interface ForecastCustomer {
+    cari_kodu: string;
+    cari_adi: string;
+    total: number;
+}
+
+interface ForecastSummary {
+    total_overdue: number;
+    total_this_week: number;
+    total_next_4_weeks: number;
+    total_12_weeks: number;
+    has_due_dates: boolean;
+}
+
+interface WeeklyForecast {
+    weeks: WeeklyForecastItem[];
+    top_customers: ForecastCustomer[];
+    summary: ForecastSummary;
 }
 
 interface Props {
@@ -108,6 +144,7 @@ interface Props {
     checks_payable: CheckItem[];
     overdue_receivables: OverdueItem[];
     overdue_payables: OverdueItem[];
+    weekly_forecast: WeeklyForecast;
     timeline: TimelineItem[];
     filters: {
         period: string;
@@ -183,6 +220,7 @@ export default function Index({
     checks_payable = [],
     overdue_receivables = [],
     overdue_payables = [],
+    weekly_forecast = { weeks: [], top_customers: [], summary: { total_overdue: 0, total_this_week: 0, total_next_4_weeks: 0, total_12_weeks: 0, has_due_dates: false } },
     timeline = [],
     filters,
 }: Props) {
@@ -267,6 +305,23 @@ export default function Index({
             b.amount_foreign != null ? formatNum(b.amount_foreign) : ''
         ]);
         downloadCsv('banka_bakiyeleri.csv', headers, rows);
+    };
+
+    const exportForecast = () => {
+        const headers = ['Hafta', 'Hafta Baslangic', 'Hafta Bitis', 'Cari Alacak (TRY)', 'Cek/Senet (TRY)', 'Toplam (TRY)', 'Musteri Sayisi'];
+        const rows = (weekly_forecast.weeks || []).map(w => [
+            escapeCsv(w.label), w.week_start || '', w.week_end || '',
+            formatNum(w.receivable_amount), formatNum(w.check_amount), formatNum(w.total_expected), String(w.customer_count)
+        ]);
+        downloadCsv('haftalik_tahsilat_tahmini.csv', headers, rows);
+    };
+
+    const exportForecastCustomers = () => {
+        const headers = ['Cari Kodu', 'Cari Adi', 'Toplam Alacak (TRY)'];
+        const rows = (weekly_forecast.top_customers || []).map(c => [
+            escapeCsv(c.cari_kodu), escapeCsv(c.cari_adi), formatNum(c.total)
+        ]);
+        downloadCsv('tahsilat_musteri_kirilimi.csv', headers, rows);
     };
 
     const exportTimeline = () => {
@@ -579,6 +634,12 @@ export default function Index({
                                         <li className="nav-item">
                                             <button className={`nav-link ${activeTab === 'bank' ? 'active' : ''}`} onClick={() => setActiveTab('bank')}>
                                                 <i className="ri-bank-line me-1"></i>Banka & Kasa
+                                            </button>
+                                        </li>
+                                        <li className="nav-item">
+                                            <button className={`nav-link ${activeTab === 'forecast' ? 'active' : ''}`} onClick={() => setActiveTab('forecast')}>
+                                                <i className="ri-line-chart-line me-1"></i>Tahsilat Tahmini
+                                                <span className="badge bg-success ms-1">{weekly_forecast.weeks?.length || 0}</span>
                                             </button>
                                         </li>
                                     </ul>
@@ -1138,6 +1199,211 @@ export default function Index({
                                                     )}
                                                 </table>
                                             </div>
+                                        </div>
+                                    )}
+
+                                    {/* Tab: Forecast */}
+                                    {activeTab === 'forecast' && (
+                                        <div>
+                                            {/* Forecast KPI Cards */}
+                                            <div className="row mb-3">
+                                                <div className="col-xl-3 col-md-6 mb-2">
+                                                    <div className="card border border-danger bg-danger-subtle h-100 mb-0">
+                                                        <div className="card-body py-2 px-3">
+                                                            <small className="text-muted">Vadesi Gecmis</small>
+                                                            <h5 className="mb-0 text-danger">{formatMoney(weekly_forecast.summary.total_overdue)}</h5>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="col-xl-3 col-md-6 mb-2">
+                                                    <div className="card border border-warning bg-warning-subtle h-100 mb-0">
+                                                        <div className="card-body py-2 px-3">
+                                                            <small className="text-muted">Bu Hafta</small>
+                                                            <h5 className="mb-0 text-warning">{formatMoney(weekly_forecast.summary.total_this_week)}</h5>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="col-xl-3 col-md-6 mb-2">
+                                                    <div className="card border border-info bg-info-subtle h-100 mb-0">
+                                                        <div className="card-body py-2 px-3">
+                                                            <small className="text-muted">Onumuzdeki 4 Hafta</small>
+                                                            <h5 className="mb-0 text-info">{formatMoney(weekly_forecast.summary.total_next_4_weeks)}</h5>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div className="col-xl-3 col-md-6 mb-2">
+                                                    <div className="card border border-success bg-success-subtle h-100 mb-0">
+                                                        <div className="card-body py-2 px-3">
+                                                            <small className="text-muted">12 Hafta Toplam</small>
+                                                            <h5 className="mb-0 text-success">{formatMoney(weekly_forecast.summary.total_12_weeks)}</h5>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {!weekly_forecast.summary.has_due_dates && (
+                                                <div className="alert alert-warning py-2 mb-3">
+                                                    <i className="ri-error-warning-line me-1"></i>
+                                                    Cari hesap hareketlerinde vade tarihi bilgisi bulunamadi. Tahminler yalnizca cek/senet vadelerine dayanmaktadir.
+                                                </div>
+                                            )}
+
+                                            {/* Weekly Forecast Chart Table */}
+                                            <div className="d-flex justify-content-between align-items-center mb-2">
+                                                <h6 className="mb-0">
+                                                    <i className="ri-line-chart-line me-1"></i>
+                                                    Haftalik Tahsilat Tahmini
+                                                </h6>
+                                                <button className="btn btn-sm btn-outline-success" onClick={exportForecast} title="Excel'e Aktar">
+                                                    <i className="ri-file-excel-2-line me-1"></i>Excel
+                                                </button>
+                                            </div>
+
+                                            {(() => {
+                                                const forecastWeeks = weekly_forecast.weeks || [];
+                                                const forecastMax = Math.max(1, ...forecastWeeks.map(w => w.total_expected));
+                                                return (
+                                                    <div className="table-responsive mb-4">
+                                                        <table className="table table-sm table-bordered mb-0" style={{ fontSize: '0.8rem' }}>
+                                                            <thead className="table-light">
+                                                                <tr>
+                                                                    <th style={{ width: '130px' }}>Hafta</th>
+                                                                    <th className="text-end">Cari Alacak</th>
+                                                                    <th className="text-end">Cek/Senet</th>
+                                                                    <th className="text-end">Toplam</th>
+                                                                    <th className="text-center">Musteri</th>
+                                                                    <th>Grafik</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {forecastWeeks.map((w, idx) => (
+                                                                    <tr
+                                                                        key={idx}
+                                                                        className={
+                                                                            w.is_overdue ? 'table-danger' :
+                                                                            w.is_current_week ? 'table-warning' : ''
+                                                                        }
+                                                                    >
+                                                                        <td className="fw-medium">
+                                                                            {w.is_overdue && <i className="ri-error-warning-line text-danger me-1"></i>}
+                                                                            {w.is_current_week && <i className="ri-arrow-right-s-fill text-warning me-1"></i>}
+                                                                            {w.label}
+                                                                        </td>
+                                                                        <td className="text-end text-success">{w.receivable_amount > 0 ? formatCompact(w.receivable_amount) : '-'}</td>
+                                                                        <td className="text-end text-primary">{w.check_amount > 0 ? formatCompact(w.check_amount) : '-'}</td>
+                                                                        <td className="text-end fw-bold">{w.total_expected > 0 ? formatCompact(w.total_expected) : '-'}</td>
+                                                                        <td className="text-center">{w.customer_count > 0 ? w.customer_count : '-'}</td>
+                                                                        <td style={{ width: '35%' }}>
+                                                                            {w.total_expected > 0 && (
+                                                                                <div className="d-flex align-items-center gap-0" style={{ height: '18px' }}>
+                                                                                    {w.receivable_amount > 0 && (
+                                                                                        <div
+                                                                                            className="bg-success"
+                                                                                            style={{
+                                                                                                width: `${(w.receivable_amount / forecastMax) * 100}%`,
+                                                                                                height: '12px',
+                                                                                                borderRadius: '2px 0 0 2px',
+                                                                                            }}
+                                                                                            title={`Cari: ${formatMoney(w.receivable_amount)}`}
+                                                                                        ></div>
+                                                                                    )}
+                                                                                    {w.check_amount > 0 && (
+                                                                                        <div
+                                                                                            className="bg-primary"
+                                                                                            style={{
+                                                                                                width: `${(w.check_amount / forecastMax) * 100}%`,
+                                                                                                height: '12px',
+                                                                                                borderRadius: w.receivable_amount > 0 ? '0 2px 2px 0' : '2px',
+                                                                                            }}
+                                                                                            title={`Cek: ${formatMoney(w.check_amount)}`}
+                                                                                        ></div>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                                {forecastWeeks.length === 0 && (
+                                                                    <tr><td colSpan={6} className="text-center text-muted py-3">Tahsilat tahmini verisi bulunamadi</td></tr>
+                                                                )}
+                                                            </tbody>
+                                                            {forecastWeeks.length > 0 && (
+                                                                <tfoot className="table-light">
+                                                                    <tr>
+                                                                        <td className="fw-bold">Genel Toplam</td>
+                                                                        <td className="text-end fw-bold text-success">
+                                                                            {formatCompact(forecastWeeks.reduce((s, w) => s + w.receivable_amount, 0))}
+                                                                        </td>
+                                                                        <td className="text-end fw-bold text-primary">
+                                                                            {formatCompact(forecastWeeks.reduce((s, w) => s + w.check_amount, 0))}
+                                                                        </td>
+                                                                        <td className="text-end fw-bold">
+                                                                            {formatCompact(forecastWeeks.reduce((s, w) => s + w.total_expected, 0))}
+                                                                        </td>
+                                                                        <td></td>
+                                                                        <td></td>
+                                                                    </tr>
+                                                                </tfoot>
+                                                            )}
+                                                        </table>
+                                                    </div>
+                                                );
+                                            })()}
+
+                                            <div className="mb-4 d-flex gap-3">
+                                                <small><span className="badge bg-success">&nbsp;</span> Cari Alacak</small>
+                                                <small><span className="badge bg-primary">&nbsp;</span> Cek/Senet</small>
+                                            </div>
+
+                                            {/* Top Customers Table */}
+                                            {(weekly_forecast.top_customers || []).length > 0 && (
+                                                <>
+                                                    <div className="d-flex justify-content-between align-items-center mb-2">
+                                                        <h6 className="mb-0">
+                                                            <i className="ri-user-star-line me-1"></i>
+                                                            En Yuksek Alacakli Musteriler (Vadeli)
+                                                        </h6>
+                                                        <button className="btn btn-sm btn-outline-success" onClick={exportForecastCustomers} title="Excel'e Aktar">
+                                                            <i className="ri-file-excel-2-line me-1"></i>Excel
+                                                        </button>
+                                                    </div>
+                                                    <div className="table-responsive">
+                                                        <table className="table table-sm table-hover table-striped align-middle mb-0" style={{ fontSize: '0.85rem' }}>
+                                                            <thead className="table-light">
+                                                                <tr>
+                                                                    <th>#</th>
+                                                                    <th>Cari Kodu</th>
+                                                                    <th>Cari Adi</th>
+                                                                    <th className="text-end">Toplam Alacak</th>
+                                                                    <th style={{ width: '30%' }}>Oran</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                                {(() => {
+                                                                    const customers = weekly_forecast.top_customers || [];
+                                                                    const maxCust = Math.max(1, ...customers.map(c => c.total));
+                                                                    return customers.map((c, idx) => (
+                                                                        <tr key={idx}>
+                                                                            <td className="text-muted">{idx + 1}</td>
+                                                                            <td><code>{c.cari_kodu}</code></td>
+                                                                            <td>{c.cari_adi}</td>
+                                                                            <td className="text-end fw-bold text-success">{formatMoney(c.total)}</td>
+                                                                            <td>
+                                                                                <div className="progress" style={{ height: '8px' }}>
+                                                                                    <div
+                                                                                        className="progress-bar bg-success"
+                                                                                        style={{ width: `${(c.total / maxCust) * 100}%` }}
+                                                                                    ></div>
+                                                                                </div>
+                                                                            </td>
+                                                                        </tr>
+                                                                    ));
+                                                                })()}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     )}
 

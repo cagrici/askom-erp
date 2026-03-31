@@ -74,6 +74,7 @@ class LogoCashFlowService
         $checksPayable = $this->safeCall(fn () => $this->getChecksPayable(), []);
         $overdueReceivables = $this->safeCall(fn () => $this->getOverdueReceivables(), []);
         $overduePayables = $this->safeCall(fn () => $this->getOverduePayables(), []);
+        $weeklyForecast = $this->safeCall(fn () => $this->getWeeklyReceivablesForecast(), ['weeks' => [], 'top_customers' => [], 'summary' => $this->emptyForecastSummary()]);
         $timeline = $this->safeCall(fn () => $this->getCashFlowTimeline($period), []);
 
         // Calculate totals
@@ -101,6 +102,9 @@ class LogoCashFlowService
                 'total_checks_payable' => round($totalChecksOut, 2),
                 'overdue_receivables' => round($overdueRecTotal, 2),
                 'overdue_payables' => round($overduePayTotal, 2),
+                'forecast_overdue' => $weeklyForecast['summary']['total_overdue'] ?? 0,
+                'forecast_this_week' => $weeklyForecast['summary']['total_this_week'] ?? 0,
+                'forecast_next_4_weeks' => $weeklyForecast['summary']['total_next_4_weeks'] ?? 0,
             ],
 
             'bank_balances' => $bankBalances,
@@ -111,6 +115,7 @@ class LogoCashFlowService
             'checks_payable' => $checksPayable,
             'overdue_receivables' => $overdueReceivables,
             'overdue_payables' => $overduePayables,
+            'weekly_forecast' => $weeklyForecast,
             'timeline' => $timeline,
 
             'filters' => [
@@ -405,6 +410,210 @@ class LogoCashFlowService
             'vadeye_kalan_gun' => (int) ($r->vadeye_kalan_gun ?? 0),
             'vadesi_gecmis' => ($r->vadeye_kalan_gun ?? 0) < 0,
         ])->all();
+    }
+
+    // ==================== WEEKLY RECEIVABLES FORECAST ====================
+
+    private function getWeeklyReceivablesForecast(): array
+    {
+        $clfTable = $this->findTable(['LG_%03d_01_CLFLINE', 'LG_%03d_CLFLINE']);
+        $clTable = $this->findTable(['LG_%03d_CLCARD', 'LG_%03d_01_CLCARD']);
+        $csTable = $this->findTable(['LG_%03d_01_CSCARD', 'LG_%03d_CSCARD']);
+
+        if (!$clfTable || !$clTable) {
+            return ['weeks' => [], 'top_customers' => [], 'summary' => $this->emptyForecastSummary()];
+        }
+
+        // Check if DUEDATE is populated in CLFLINE
+        $dueDateCheck = DB::connection($this->connection)->selectOne("
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN DUEDATE > '1900-01-01' THEN 1 ELSE 0 END) as with_duedate
+            FROM [{$clfTable}]
+            WHERE CANCELLED = 0
+        ");
+
+        $hasDueDates = ($dueDateCheck->with_duedate ?? 0) > 0;
+
+        // Build 13 week slots: overdue + this week + 11 future weeks
+        $weeks = [];
+        $now = Carbon::now();
+        $weekStart = $now->copy()->startOfWeek();
+
+        // Slot 0: overdue (DUEDATE < today)
+        $weeks['overdue'] = [
+            'week_key' => 'overdue',
+            'label' => 'Vadesi Geçmiş',
+            'week_start' => null,
+            'week_end' => $now->copy()->subDay()->format('Y-m-d'),
+            'receivable_amount' => 0,
+            'check_amount' => 0,
+            'total_expected' => 0,
+            'customer_count' => 0,
+            'is_overdue' => true,
+            'is_current_week' => false,
+        ];
+
+        // Slots 1-12: this week + next 11 weeks
+        for ($i = 0; $i < 12; $i++) {
+            $ws = $weekStart->copy()->addWeeks($i);
+            $we = $ws->copy()->endOfWeek();
+            $key = $ws->format('Y-m-d');
+            $weeks[$key] = [
+                'week_key' => $key,
+                'label' => $ws->format('d.m') . ' - ' . $we->format('d.m'),
+                'week_start' => $ws->format('Y-m-d'),
+                'week_end' => $we->format('Y-m-d'),
+                'receivable_amount' => 0,
+                'check_amount' => 0,
+                'total_expected' => 0,
+                'customer_count' => 0,
+                'is_overdue' => false,
+                'is_current_week' => $i === 0,
+            ];
+        }
+
+        // Query CLFLINE receivables grouped by week (if DUEDATE data exists)
+        if ($hasDueDates) {
+            $endDate = $weekStart->copy()->addWeeks(12)->format('Y-m-d');
+
+            $recRows = DB::connection($this->connection)->select("
+                SELECT
+                    CASE
+                        WHEN clf.DUEDATE < CAST(GETDATE() AS DATE) THEN 'overdue'
+                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, clf.DUEDATE), CAST(clf.DUEDATE AS DATE)), 23)
+                    END as week_start,
+                    ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) as net_tutar,
+                    COUNT(DISTINCT clf.CLIENTREF) as cari_sayisi
+                FROM [{$clfTable}] clf
+                WHERE clf.CANCELLED = 0
+                  AND clf.DUEDATE > '1900-01-01'
+                  AND clf.DUEDATE <= ?
+                GROUP BY
+                    CASE
+                        WHEN clf.DUEDATE < CAST(GETDATE() AS DATE) THEN 'overdue'
+                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, clf.DUEDATE), CAST(clf.DUEDATE AS DATE)), 23)
+                    END
+                HAVING ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) > 0
+                ORDER BY week_start
+            ", [$endDate]);
+
+            foreach ($recRows as $r) {
+                $wk = (string) $r->week_start;
+                if (isset($weeks[$wk])) {
+                    $weeks[$wk]['receivable_amount'] = round((float) $r->net_tutar, 2);
+                    $weeks[$wk]['customer_count'] = (int) $r->cari_sayisi;
+                }
+            }
+        }
+
+        // Query CSCARD checks grouped by week
+        if ($csTable) {
+            $endDate = $weekStart->copy()->addWeeks(12)->format('Y-m-d');
+
+            $checkRows = DB::connection($this->connection)->select("
+                SELECT
+                    CASE
+                        WHEN cs.DUEDATE < CAST(GETDATE() AS DATE) THEN 'overdue'
+                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, cs.DUEDATE), CAST(cs.DUEDATE AS DATE)), 23)
+                    END as week_start,
+                    ISNULL(SUM(cs.AMOUNT), 0) as check_amount
+                FROM [{$csTable}] cs
+                WHERE cs.CANCELLED = 0
+                  AND cs.CURRSTAT IN (1, 2)
+                  AND cs.DUEDATE > '1900-01-01'
+                  AND cs.DUEDATE <= ?
+                GROUP BY
+                    CASE
+                        WHEN cs.DUEDATE < CAST(GETDATE() AS DATE) THEN 'overdue'
+                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, cs.DUEDATE), CAST(cs.DUEDATE AS DATE)), 23)
+                    END
+                ORDER BY week_start
+            ", [$endDate]);
+
+            foreach ($checkRows as $r) {
+                $wk = (string) $r->week_start;
+                if (isset($weeks[$wk])) {
+                    $weeks[$wk]['check_amount'] = round((float) $r->check_amount, 2);
+                }
+            }
+        }
+
+        // Calculate totals
+        foreach ($weeks as &$w) {
+            $w['total_expected'] = round($w['receivable_amount'] + $w['check_amount'], 2);
+        }
+        unset($w);
+
+        // Top customers by receivable amount (next 12 weeks + overdue)
+        $topCustomers = [];
+        if ($hasDueDates) {
+            $endDate = $weekStart->copy()->addWeeks(12)->format('Y-m-d');
+
+            $custRows = DB::connection($this->connection)->select("
+                SELECT
+                    cl.CODE as cari_kodu,
+                    cl.DEFINITION_ as cari_adi,
+                    ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) as toplam
+                FROM [{$clfTable}] clf
+                JOIN [{$clTable}] cl ON clf.CLIENTREF = cl.LOGICALREF
+                WHERE clf.CANCELLED = 0
+                  AND clf.DUEDATE > '1900-01-01'
+                  AND clf.DUEDATE <= ?
+                GROUP BY cl.CODE, cl.DEFINITION_
+                HAVING ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) > 0
+                ORDER BY ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) DESC
+                OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY
+            ", [$endDate]);
+
+            foreach ($custRows as $cr) {
+                $topCustomers[] = [
+                    'cari_kodu' => (string) $cr->cari_kodu,
+                    'cari_adi' => (string) $cr->cari_adi,
+                    'total' => round((float) $cr->toplam, 2),
+                ];
+            }
+        }
+
+        // Build summary
+        $weekValues = array_values($weeks);
+        $overdueAmount = $weeks['overdue']['total_expected'];
+        $thisWeekAmount = $weekValues[1]['total_expected'] ?? 0;
+        $next4Weeks = 0;
+        $total12Weeks = 0;
+        for ($i = 1; $i <= 12; $i++) {
+            if (isset($weekValues[$i])) {
+                $total12Weeks += $weekValues[$i]['total_expected'];
+                if ($i <= 4) {
+                    $next4Weeks += $weekValues[$i]['total_expected'];
+                }
+            }
+        }
+
+        $summary = [
+            'total_overdue' => round($overdueAmount, 2),
+            'total_this_week' => round($thisWeekAmount, 2),
+            'total_next_4_weeks' => round($next4Weeks, 2),
+            'total_12_weeks' => round($total12Weeks, 2),
+            'has_due_dates' => $hasDueDates,
+        ];
+
+        return [
+            'weeks' => array_values($weeks),
+            'top_customers' => $topCustomers,
+            'summary' => $summary,
+        ];
+    }
+
+    private function emptyForecastSummary(): array
+    {
+        return [
+            'total_overdue' => 0,
+            'total_this_week' => 0,
+            'total_next_4_weeks' => 0,
+            'total_12_weeks' => 0,
+            'has_due_dates' => false,
+        ];
     }
 
     // ==================== TIMELINE ====================

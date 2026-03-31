@@ -188,7 +188,10 @@ export default function Create({ units, currencies, locations }: Props) {
     // Get selected currency info
     const selectedCurrency = currencies.find(c => c.id === data.currency_id);
     const offerCurrencyCode = selectedCurrency?.cur_code || 'TRY';
-    const currencySymbol = selectedCurrency?.symbol || (offerCurrencyCode === 'TRY' ? '₺' : offerCurrencyCode === 'USD' ? '$' : offerCurrencyCode === 'EUR' ? '€' : offerCurrencyCode + ' ');
+    const getCurrencySymbol = (currencyCode: string) =>
+        currencies.find(c => c.cur_code === currencyCode)?.symbol
+        || (currencyCode === 'TRY' ? '₺' : currencyCode === 'USD' ? '$' : currencyCode === 'EUR' ? '€' : currencyCode + ' ');
+    const currencySymbol = selectedCurrency?.symbol || getCurrencySymbol(offerCurrencyCode);
 
     // Load exchange rates on mount
     useEffect(() => {
@@ -626,7 +629,10 @@ export default function Create({ units, currencies, locations }: Props) {
                 if (unitPrice > 0) {
                     const productCurrency = item.original_currency || 'TRY';
                     const convertedPrice = convertPrice(unitPrice, productCurrency, offerCurrencyCode);
-                    updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
+                    const roundedPrice = Math.round(convertedPrice * 100) / 100;
+                    updatedItems[index].unit_price = roundedPrice;
+                    updatedItems[index].original_unit_price = roundedPrice;
+                    updatedItems[index].original_price_in_currency = unitPrice;
                 }
             }
         } else if (!unitId) {
@@ -634,7 +640,10 @@ export default function Create({ units, currencies, locations }: Props) {
             const basePrice = item.product.sale_price || item.product.logo_sale_price || 0;
             const productCurrency = item.original_currency || 'TRY';
             const convertedPrice = convertPrice(basePrice, productCurrency, offerCurrencyCode);
-            updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
+            const roundedPrice = Math.round(convertedPrice * 100) / 100;
+            updatedItems[index].unit_price = roundedPrice;
+            updatedItems[index].original_unit_price = roundedPrice;
+            updatedItems[index].original_price_in_currency = basePrice;
         }
 
         // Recalculate totals (3 kademeli iskonto)
@@ -1166,6 +1175,11 @@ export default function Create({ units, currencies, locations }: Props) {
                                                                     {item.original_unit_price && item.unit_price !== item.original_unit_price && (
                                                                         <small className="text-muted d-block mt-1">
                                                                             <s>{currencySymbol}{fmt(Number(item.original_unit_price))}</s>
+                                                                        </small>
+                                                                    )}
+                                                                    {item.original_currency && item.original_currency !== offerCurrencyCode && Number(item.original_price_in_currency) > 0 && (
+                                                                        <small className="text-muted d-block">
+                                                                            Orijinal: {getCurrencySymbol(item.original_currency)}{fmt(Number(item.original_price_in_currency))}
                                                                         </small>
                                                                     )}
                                                                 </td>

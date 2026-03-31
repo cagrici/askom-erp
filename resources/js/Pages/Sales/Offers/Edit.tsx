@@ -435,12 +435,18 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                 // Use unit-specific price if available, otherwise calculate from base price * conversion_factor
                 if (selectedUnit.sale_price > 0) {
                     const convertedPrice = convertPrice(selectedUnit.sale_price, productCurrency, offerCurrencyCode);
-                    updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
+                    const roundedPrice = Math.round(convertedPrice * 100) / 100;
+                    updatedItems[index].unit_price = roundedPrice;
+                    updatedItems[index].original_unit_price = roundedPrice;
+                    updatedItems[index].original_price_in_currency = selectedUnit.sale_price;
                 } else if (selectedUnit.conversion_factor > 0) {
                     // Calculate price based on conversion factor
                     const basePrice = item.product.sale_price || item.product.logo_sale_price || 0;
                     const convertedPrice = convertPrice(basePrice * selectedUnit.conversion_factor, productCurrency, offerCurrencyCode);
-                    updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
+                    const roundedPrice = Math.round(convertedPrice * 100) / 100;
+                    updatedItems[index].unit_price = roundedPrice;
+                    updatedItems[index].original_unit_price = roundedPrice;
+                    updatedItems[index].original_price_in_currency = basePrice * selectedUnit.conversion_factor;
                 }
             }
         } else if (!unitId) {
@@ -452,7 +458,10 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                 && Number(item.product.sale_price_try) > 0
                 ? Number(item.product.sale_price_try)
                 : convertPrice(basePrice, productCurrency, offerCurrencyCode);
-            updatedItems[index].unit_price = Math.round(convertedPrice * 100) / 100;
+            const roundedPrice = Math.round(convertedPrice * 100) / 100;
+            updatedItems[index].unit_price = roundedPrice;
+            updatedItems[index].original_unit_price = roundedPrice;
+            updatedItems[index].original_price_in_currency = basePrice;
         }
 
         // Recalculate totals (3 kademeli iskonto)
@@ -916,6 +925,11 @@ export default function Edit({ offer, units, currencies, locations }: Props) {
                                                                     {item.original_unit_price && item.unit_price !== item.original_unit_price && (
                                                                         <small className="text-muted d-block mt-1">
                                                                             <s>{currencySymbol}{fmt(Number(item.original_unit_price))}</s>
+                                                                        </small>
+                                                                    )}
+                                                                    {item.original_currency && item.original_currency !== offerCurrencyCode && Number(item.original_price_in_currency) > 0 && (
+                                                                        <small className="text-muted d-block">
+                                                                            Orijinal: {getCurrencySymbol(item.original_currency)}{fmt(Number(item.original_price_in_currency))}
                                                                         </small>
                                                                     )}
                                                                 </td>

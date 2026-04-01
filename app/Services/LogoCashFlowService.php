@@ -576,6 +576,7 @@ class LogoCashFlowService
         $weekValues = array_values($weeks);
         $overdueAmount = $weeks['overdue']['total_expected'];
         $thisWeekAmount = $weekValues[1]['total_expected'] ?? 0;
+        $nextWeekAmount = $weekValues[2]['total_expected'] ?? 0;
         $next4Weeks = 0;
         $total12Weeks = 0;
         for ($i = 1; $i <= 12; $i++) {
@@ -590,6 +591,7 @@ class LogoCashFlowService
         $summary = [
             'total_overdue' => round($overdueAmount, 2),
             'total_this_week' => round($thisWeekAmount, 2),
+            'total_next_week' => round($nextWeekAmount, 2),
             'total_next_4_weeks' => round($next4Weeks, 2),
             'total_12_weeks' => round($total12Weeks, 2),
             'has_due_dates' => $hasPaymentPlans,
@@ -607,6 +609,7 @@ class LogoCashFlowService
         return [
             'total_overdue' => 0,
             'total_this_week' => 0,
+            'total_next_week' => 0,
             'total_next_4_weeks' => 0,
             'total_12_weeks' => 0,
             'has_due_dates' => false,

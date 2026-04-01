@@ -115,6 +115,7 @@ interface WeeklyForecastItem {
 interface ForecastCustomer {
     cari_kodu: string;
     cari_adi: string;
+    vade_gun?: string;
     total: number;
 }
 
@@ -1244,7 +1245,14 @@ export default function Index({
                                             {!weekly_forecast.summary.has_due_dates && (
                                                 <div className="alert alert-warning py-2 mb-3">
                                                     <i className="ri-error-warning-line me-1"></i>
-                                                    Cari hesap hareketlerinde vade tarihi bilgisi bulunamadi. Tahminler yalnizca cek/senet vadelerine dayanmaktadir.
+                                                    Cari hesap odeme plani bilgisi bulunamadi. Tahminler yalnizca cek/senet vadelerine dayanmaktadir.
+                                                </div>
+                                            )}
+
+                                            {weekly_forecast.summary.has_due_dates && (
+                                                <div className="alert alert-info py-2 mb-3">
+                                                    <i className="ri-information-line me-1"></i>
+                                                    Vade tarihleri, cari kartindaki odeme plani (gun) kullanilarak hesaplanmaktadir (islem tarihi + odeme plani gun).
                                                 </div>
                                             )}
 
@@ -1374,8 +1382,9 @@ export default function Index({
                                                                     <th>#</th>
                                                                     <th>Cari Kodu</th>
                                                                     <th>Cari Adi</th>
+                                                                    <th className="text-center">Vade (Gun)</th>
                                                                     <th className="text-end">Toplam Alacak</th>
-                                                                    <th style={{ width: '30%' }}>Oran</th>
+                                                                    <th style={{ width: '25%' }}>Oran</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody>
@@ -1387,6 +1396,9 @@ export default function Index({
                                                                             <td className="text-muted">{idx + 1}</td>
                                                                             <td><code>{c.cari_kodu}</code></td>
                                                                             <td>{c.cari_adi}</td>
+                                                                            <td className="text-center">
+                                                                                <span className="badge bg-secondary">{c.vade_gun || '0'} gun</span>
+                                                                            </td>
                                                                             <td className="text-end fw-bold text-success">{formatMoney(c.total)}</td>
                                                                             <td>
                                                                                 <div className="progress" style={{ height: '8px' }}>

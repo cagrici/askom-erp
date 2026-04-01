@@ -424,25 +424,9 @@ class LogoCashFlowService
             return ['weeks' => [], 'top_customers' => [], 'summary' => $this->emptyForecastSummary()];
         }
 
-        // Check if DUEDATE column exists in CLFLINE
-        $hasDueDates = false;
-        if ($clfTable && $clTable) {
-            try {
-                DB::connection($this->connection)->selectOne("
-                    SELECT TOP 1 DUEDATE FROM [{$clfTable}]
-                ");
-                // Column exists, check if it has meaningful data
-                $dueDateCheck = DB::connection($this->connection)->selectOne("
-                    SELECT SUM(CASE WHEN DUEDATE > '1900-01-01' THEN 1 ELSE 0 END) as with_duedate
-                    FROM [{$clfTable}]
-                    WHERE CANCELLED = 0
-                ");
-                $hasDueDates = ($dueDateCheck->with_duedate ?? 0) > 0;
-            } catch (\Throwable) {
-                // DUEDATE column doesn't exist in this Logo version
-                $hasDueDates = false;
-            }
-        }
+        // Payment plan table for calculating due dates from CLCARD.PAYMENTREF
+        $ppTable = $this->findTable(['LG_%03d_PAYPLANS']);
+        $hasPaymentPlans = $clfTable && $clTable && $ppTable;
 
         // Build 13 week slots: overdue + this week + 11 future weeks
         $weeks = [];
@@ -482,26 +466,28 @@ class LogoCashFlowService
             ];
         }
 
-        // Query CLFLINE receivables grouped by week (if DUEDATE data exists)
-        if ($hasDueDates) {
+        // Query CLFLINE receivables grouped by week using payment plan due date
+        // vade_tarihi = clf.DATE_ + CAST(pp.CODE AS INT) days
+        if ($hasPaymentPlans) {
             $endDate = $weekStart->copy()->addWeeks(12)->format('Y-m-d');
 
             $recRows = DB::connection($this->connection)->select("
                 SELECT
                     CASE
-                        WHEN clf.DUEDATE < CAST(GETDATE() AS DATE) THEN 'overdue'
-                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, clf.DUEDATE), CAST(clf.DUEDATE AS DATE)), 23)
+                        WHEN DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_) < CAST(GETDATE() AS DATE) THEN 'overdue'
+                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_)), DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_)), 23)
                     END as week_start,
                     ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) as net_tutar,
                     COUNT(DISTINCT clf.CLIENTREF) as cari_sayisi
                 FROM [{$clfTable}] clf
+                JOIN [{$clTable}] cl ON clf.CLIENTREF = cl.LOGICALREF
+                LEFT JOIN [{$ppTable}] pp ON cl.PAYMENTREF = pp.LOGICALREF
                 WHERE clf.CANCELLED = 0
-                  AND clf.DUEDATE > '1900-01-01'
-                  AND clf.DUEDATE <= ?
+                  AND DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_) <= ?
                 GROUP BY
                     CASE
-                        WHEN clf.DUEDATE < CAST(GETDATE() AS DATE) THEN 'overdue'
-                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, clf.DUEDATE), CAST(clf.DUEDATE AS DATE)), 23)
+                        WHEN DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_) < CAST(GETDATE() AS DATE) THEN 'overdue'
+                        ELSE CONVERT(VARCHAR, DATEADD(DAY, 2-DATEPART(WEEKDAY, DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_)), DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_)), 23)
                     END
                 HAVING ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) > 0
                 ORDER BY week_start
@@ -556,20 +542,21 @@ class LogoCashFlowService
 
         // Top customers by receivable amount (next 12 weeks + overdue)
         $topCustomers = [];
-        if ($hasDueDates) {
+        if ($hasPaymentPlans) {
             $endDate = $weekStart->copy()->addWeeks(12)->format('Y-m-d');
 
             $custRows = DB::connection($this->connection)->select("
                 SELECT
                     cl.CODE as cari_kodu,
                     cl.DEFINITION_ as cari_adi,
+                    pp.CODE as vade_gun,
                     ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) as toplam
                 FROM [{$clfTable}] clf
                 JOIN [{$clTable}] cl ON clf.CLIENTREF = cl.LOGICALREF
+                LEFT JOIN [{$ppTable}] pp ON cl.PAYMENTREF = pp.LOGICALREF
                 WHERE clf.CANCELLED = 0
-                  AND clf.DUEDATE > '1900-01-01'
-                  AND clf.DUEDATE <= ?
-                GROUP BY cl.CODE, cl.DEFINITION_
+                  AND DATEADD(DAY, ISNULL(TRY_CAST(pp.CODE AS INT), 0), clf.DATE_) <= ?
+                GROUP BY cl.CODE, cl.DEFINITION_, pp.CODE
                 HAVING ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) > 0
                 ORDER BY ISNULL(SUM(CASE WHEN clf.SIGN = 0 THEN clf.AMOUNT ELSE -clf.AMOUNT END), 0) DESC
                 OFFSET 0 ROWS FETCH NEXT 30 ROWS ONLY
@@ -579,6 +566,7 @@ class LogoCashFlowService
                 $topCustomers[] = [
                     'cari_kodu' => (string) $cr->cari_kodu,
                     'cari_adi' => (string) $cr->cari_adi,
+                    'vade_gun' => (string) ($cr->vade_gun ?? '0'),
                     'total' => round((float) $cr->toplam, 2),
                 ];
             }
@@ -604,7 +592,7 @@ class LogoCashFlowService
             'total_this_week' => round($thisWeekAmount, 2),
             'total_next_4_weeks' => round($next4Weeks, 2),
             'total_12_weeks' => round($total12Weeks, 2),
-            'has_due_dates' => $hasDueDates,
+            'has_due_dates' => $hasPaymentPlans,
         ];
 
         return [

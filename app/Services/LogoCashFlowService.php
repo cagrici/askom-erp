@@ -420,20 +420,29 @@ class LogoCashFlowService
         $clTable = $this->findTable(['LG_%03d_CLCARD', 'LG_%03d_01_CLCARD']);
         $csTable = $this->findTable(['LG_%03d_01_CSCARD', 'LG_%03d_CSCARD']);
 
-        if (!$clfTable || !$clTable) {
+        if (!$csTable && (!$clfTable || !$clTable)) {
             return ['weeks' => [], 'top_customers' => [], 'summary' => $this->emptyForecastSummary()];
         }
 
-        // Check if DUEDATE is populated in CLFLINE
-        $dueDateCheck = DB::connection($this->connection)->selectOne("
-            SELECT
-                COUNT(*) as total,
-                SUM(CASE WHEN DUEDATE > '1900-01-01' THEN 1 ELSE 0 END) as with_duedate
-            FROM [{$clfTable}]
-            WHERE CANCELLED = 0
-        ");
-
-        $hasDueDates = ($dueDateCheck->with_duedate ?? 0) > 0;
+        // Check if DUEDATE column exists in CLFLINE
+        $hasDueDates = false;
+        if ($clfTable && $clTable) {
+            try {
+                DB::connection($this->connection)->selectOne("
+                    SELECT TOP 1 DUEDATE FROM [{$clfTable}]
+                ");
+                // Column exists, check if it has meaningful data
+                $dueDateCheck = DB::connection($this->connection)->selectOne("
+                    SELECT SUM(CASE WHEN DUEDATE > '1900-01-01' THEN 1 ELSE 0 END) as with_duedate
+                    FROM [{$clfTable}]
+                    WHERE CANCELLED = 0
+                ");
+                $hasDueDates = ($dueDateCheck->with_duedate ?? 0) > 0;
+            } catch (\Throwable) {
+                // DUEDATE column doesn't exist in this Logo version
+                $hasDueDates = false;
+            }
+        }
 
         // Build 13 week slots: overdue + this week + 11 future weeks
         $weeks = [];

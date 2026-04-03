@@ -443,7 +443,7 @@ const Navdata = () => {
                 {id: "bank-accounts", label: "Banka Hesapları", link: "/accounting/bank-accounts", parentId: "accounting"},
                 {id: "cash-accounts", label: "Kasa İşlemleri", link: "/accounting/cash", parentId: "accounting", visible: !hasRole('sales_representative')},
                 {id: "expense-management", label: "Masraf Yönetimi", link: "/accounting/expenses", parentId: "accounting", visible: !hasRole('sales_representative')},
-                {id: "cash-flow", label: "Nakit Akışı", link: "/accounting/cash-flow", parentId: "accounting", visible: hasPermission('View Cash Flow')},
+                {id: "cash-flow", label: "Nakit Akışı", link: "/accounting/cash-flow", parentId: "accounting", visible: hasPermission('reports.view_cash_flow')},
                 {id: "aging-reports", label: "Vade Analizleri", link: "/accounting/aging", parentId: "accounting"},
             ].filter(item => item.visible !== false),
         },

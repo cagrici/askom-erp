@@ -46,10 +46,10 @@ class AccountingCashFlowPermissionSeeder extends Seeder
     private function createPermission(): Permission
     {
         return Permission::firstOrCreate(
-            ['name' => 'View Cash Flow'],
+            ['name' => 'reports.view_cash_flow'],
             [
                 'guard_name' => 'web',
-                'slug' => Str::slug('View Cash Flow'),
+                'slug' => 'reports-view-cash-flow',
                 'description' => 'Nakit akisi ekranina erisim izni',
                 'module' => 'accounting',
                 'display_name' => 'Nakit Akisi Goruntuleme',

@@ -565,7 +565,7 @@ Route::middleware(['auth'])->prefix('accounting')->name('accounting.')->group(fu
 
     // Cash Flow (Nakit Akışı)
     Route::get('/cash-flow', [\App\Http\Controllers\Accounting\CashFlowController::class, 'index'])
-        ->middleware('permission:View Cash Flow')
+        ->middleware('permission:reports.view_cash_flow')
         ->name('cash-flow.index');
 });
 

@@ -36,7 +36,9 @@ class HandleInertiaRequests extends Middleware
         if ($user) {
             $user->load('roles');
             // Get all permissions including those inherited from roles
-            $user->setAttribute('permissions', $user->getAllPermissions());
+            // Must use setRelation() — setAttribute() gets overridden by the
+            // loaded Spatie 'permissions' relationship during JSON serialization.
+            $user->setRelation('permissions', $user->getAllPermissions());
         }
 
         return [

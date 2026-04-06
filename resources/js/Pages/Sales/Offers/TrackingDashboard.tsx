@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Head, Link, router } from '@inertiajs/react';
-import { Card, Table, Button, Row, Col, Badge, Nav } from 'react-bootstrap';
+import { Card, Table, Button, Row, Col, Badge, Nav, Form } from 'react-bootstrap';
 import Layout from '@/Layouts';
 
 interface Stats {
@@ -43,10 +43,16 @@ interface PaginatedOffers {
     }>;
 }
 
+interface Filters {
+    date_from?: string;
+    date_to?: string;
+}
+
 interface Props {
     stats: Stats;
     offers: PaginatedOffers;
     tab: string;
+    filters: Filters;
 }
 
 const statusColors: Record<string, string> = {
@@ -69,8 +75,6 @@ const statusLabels: Record<string, string> = {
     expired: 'Suresi Doldu'
 };
 
-// Pagination labels from Laravel are simple text like "Previous", "Next", "1", "2" etc.
-// They are safe to render directly without dangerouslySetInnerHTML.
 function decodePaginationLabel(label: string): string {
     return label
         .replace(/&laquo;/g, '\u00AB')
@@ -78,9 +82,35 @@ function decodePaginationLabel(label: string): string {
         .replace(/&amp;/g, '&');
 }
 
-export default function TrackingDashboard({ stats, offers, tab }: Props) {
+export default function TrackingDashboard({ stats, offers, tab, filters }: Props) {
+    const [dateFrom, setDateFrom] = useState(filters?.date_from || '');
+    const [dateTo, setDateTo] = useState(filters?.date_to || '');
+
+    const buildParams = (overrides: Record<string, string> = {}) => {
+        const params: Record<string, string> = { tab };
+        if (dateFrom) params.date_from = dateFrom;
+        if (dateTo) params.date_to = dateTo;
+        return { ...params, ...overrides };
+    };
+
     const handleTabChange = (newTab: string) => {
-        router.get(route('sales.offers.tracking'), { tab: newTab }, {
+        router.get(route('sales.offers.tracking'), buildParams({ tab: newTab }), {
+            preserveState: true,
+            preserveScroll: true,
+        });
+    };
+
+    const handleDateFilter = () => {
+        router.get(route('sales.offers.tracking'), buildParams(), {
+            preserveState: true,
+            preserveScroll: true,
+        });
+    };
+
+    const handleClearDates = () => {
+        setDateFrom('');
+        setDateTo('');
+        router.get(route('sales.offers.tracking'), { tab }, {
             preserveState: true,
             preserveScroll: true,
         });
@@ -112,6 +142,46 @@ export default function TrackingDashboard({ stats, offers, tab }: Props) {
                             </div>
                         </Col>
                     </Row>
+
+                    {/* Date Range Filter */}
+                    <Card className="mb-3">
+                        <Card.Body className="py-2">
+                            <Row className="align-items-end g-2">
+                                <Col xs="auto">
+                                    <Form.Label className="mb-1 small text-muted">Baslangic</Form.Label>
+                                    <Form.Control
+                                        type="date"
+                                        size="sm"
+                                        value={dateFrom}
+                                        onChange={(e) => setDateFrom(e.target.value)}
+                                    />
+                                </Col>
+                                <Col xs="auto">
+                                    <Form.Label className="mb-1 small text-muted">Bitis</Form.Label>
+                                    <Form.Control
+                                        type="date"
+                                        size="sm"
+                                        value={dateTo}
+                                        onChange={(e) => setDateTo(e.target.value)}
+                                    />
+                                </Col>
+                                <Col xs="auto">
+                                    <Button variant="primary" size="sm" onClick={handleDateFilter}>
+                                        <i className="ri-filter-3-line me-1"></i>
+                                        Filtrele
+                                    </Button>
+                                </Col>
+                                {(dateFrom || dateTo) && (
+                                    <Col xs="auto">
+                                        <Button variant="outline-secondary" size="sm" onClick={handleClearDates}>
+                                            <i className="ri-close-line me-1"></i>
+                                            Temizle
+                                        </Button>
+                                    </Col>
+                                )}
+                            </Row>
+                        </Card.Body>
+                    </Card>
 
                     {/* Stats Cards */}
                     <Row className="mb-3">

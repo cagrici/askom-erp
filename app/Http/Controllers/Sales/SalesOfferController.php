@@ -565,28 +565,50 @@ class SalesOfferController extends Controller
      */
     public function trackingDashboard(Request $request)
     {
-        // Stats
-        $totalOffers = SalesOffer::count();
-        $sentOffers = SalesOffer::where('email_sent_count', '>', 0)->count();
-        $awaitingResponse = SalesOffer::where('email_sent_count', '>', 0)
-            ->whereIn('status', ['sent', 'draft'])
-            ->where('valid_until_date', '>=', now())
-            ->count();
-        $expiredOffers = SalesOffer::where('email_sent_count', '>', 0)
-            ->whereNotIn('status', ['converted_to_order', 'approved', 'accepted'])
-            ->where('valid_until_date', '<', now())
-            ->count();
-        $approvedOffers = SalesOffer::whereIn('status', ['approved', 'accepted'])->count();
-        $convertedOffers = SalesOffer::where('status', 'converted_to_order')->count();
-
-        // Open rate from logs
-        $totalEmailsSent = \App\Models\OfferEmailLog::where('status', 'sent')->count();
-        $totalOpened = \App\Models\OfferEmailLog::where('status', 'sent')->whereNotNull('opened_at')->count();
-
-        // Filter
         $tab = $request->input('tab', 'awaiting');
+        $dateFrom = $request->input('date_from');
+        $dateTo = $request->input('date_to');
+
+        // Base date filter closure
+        $applyDateFilter = function ($query) use ($dateFrom, $dateTo) {
+            if ($dateFrom) {
+                $query->where('offer_date', '>=', $dateFrom);
+            }
+            if ($dateTo) {
+                $query->where('offer_date', '<=', $dateTo);
+            }
+            return $query;
+        };
+
+        // Stats (all filtered by date range when set)
+        $totalOffers = $applyDateFilter(SalesOffer::query())->count();
+        $sentOffers = $applyDateFilter(SalesOffer::where('email_sent_count', '>', 0))->count();
+        $awaitingResponse = $applyDateFilter(SalesOffer::where('email_sent_count', '>', 0)
+            ->whereIn('status', ['sent', 'draft'])
+            ->where('valid_until_date', '>=', now()))->count();
+        $expiredOffers = $applyDateFilter(SalesOffer::where('email_sent_count', '>', 0)
+            ->whereNotIn('status', ['converted_to_order', 'approved', 'accepted'])
+            ->where('valid_until_date', '<', now()))->count();
+        $approvedOffers = $applyDateFilter(SalesOffer::where('email_sent_count', '>', 0)
+            ->whereIn('status', ['approved', 'accepted']))->count();
+        $convertedOffers = $applyDateFilter(SalesOffer::where('email_sent_count', '>', 0)
+            ->where('status', 'converted_to_order'))->count();
+
+        // Open rate from logs (filtered by date range via offer relationship)
+        $emailLogQuery = \App\Models\OfferEmailLog::where('status', 'sent');
+        if ($dateFrom || $dateTo) {
+            $emailLogQuery->whereHas('offer', function ($q) use ($dateFrom, $dateTo) {
+                if ($dateFrom) $q->where('offer_date', '>=', $dateFrom);
+                if ($dateTo) $q->where('offer_date', '<=', $dateTo);
+            });
+        }
+        $totalEmailsSent = (clone $emailLogQuery)->count();
+        $totalOpened = (clone $emailLogQuery)->whereNotNull('opened_at')->count();
+
+        // Table filter
         $query = SalesOffer::with(['entity', 'creator', 'currency'])
             ->where('email_sent_count', '>', 0);
+        $applyDateFilter($query);
 
         switch ($tab) {
             case 'awaiting':
@@ -627,6 +649,10 @@ class SalesOfferController extends Controller
             ],
             'offers' => $offers,
             'tab' => $tab,
+            'filters' => [
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+            ],
         ]);
     }
 

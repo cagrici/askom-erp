@@ -82,6 +82,8 @@ const statusLabels: Record<string, string> = {
 export default function Index({ offers, filters }: Props) {
     const [search, setSearch] = useState(filters.search || '');
     const [status, setStatus] = useState(filters.status || '');
+    const [dateFrom, setDateFrom] = useState(filters.date_from || '');
+    const [dateTo, setDateTo] = useState(filters.date_to || '');
     const [showEmailModal, setShowEmailModal] = useState(false);
     const [emailOfferId, setEmailOfferId] = useState<number | null>(null);
     const [emailForm, setEmailForm] = useState({
@@ -134,12 +136,12 @@ export default function Index({ offers, filters }: Props) {
     };
 
     const handleFilter = () => {
-        router.get(route('sales.offers.index'), {
-            search,
-            status,
-            date_from: filters.date_from,
-            date_to: filters.date_to
-        }, {
+        const params: Record<string, string> = {};
+        if (search) params.search = search;
+        if (status) params.status = status;
+        if (dateFrom) params.date_from = dateFrom;
+        if (dateTo) params.date_to = dateTo;
+        router.get(route('sales.offers.index'), params, {
             preserveState: true,
             preserveScroll: true
         });
@@ -148,6 +150,8 @@ export default function Index({ offers, filters }: Props) {
     const handleReset = () => {
         setSearch('');
         setStatus('');
+        setDateFrom('');
+        setDateTo('');
         router.get(route('sales.offers.index'));
     };
 
@@ -181,8 +185,8 @@ export default function Index({ offers, filters }: Props) {
 
                     <Card>
                         <Card.Body>
-                            <Row className="mb-3">
-                                <Col md={4}>
+                            <Row className="mb-3 g-2 align-items-end">
+                                <Col md={3}>
                                     <Form.Control
                                         type="text"
                                         placeholder="Teklif No, Müşteri Ara..."
@@ -191,7 +195,7 @@ export default function Index({ offers, filters }: Props) {
                                         onKeyPress={(e) => e.key === 'Enter' && handleFilter()}
                                     />
                                 </Col>
-                                <Col md={3}>
+                                <Col md={2}>
                                     <Form.Select
                                         value={status}
                                         onChange={(e) => setStatus(e.target.value)}
@@ -205,7 +209,23 @@ export default function Index({ offers, filters }: Props) {
                                         <option value="expired">Süresi Doldu</option>
                                     </Form.Select>
                                 </Col>
-                                <Col md={5}>
+                                <Col md={2}>
+                                    <Form.Control
+                                        type="date"
+                                        value={dateFrom}
+                                        onChange={(e) => setDateFrom(e.target.value)}
+                                        title="Başlangıç Tarihi"
+                                    />
+                                </Col>
+                                <Col md={2}>
+                                    <Form.Control
+                                        type="date"
+                                        value={dateTo}
+                                        onChange={(e) => setDateTo(e.target.value)}
+                                        title="Bitiş Tarihi"
+                                    />
+                                </Col>
+                                <Col md={3}>
                                     <Button variant="primary" onClick={handleFilter} className="me-2">
                                         <i className="ri-search-line me-1"></i>
                                         Filtrele

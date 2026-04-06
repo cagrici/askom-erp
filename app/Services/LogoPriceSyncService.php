@@ -57,6 +57,7 @@ class LogoPriceSyncService
             $stats = [
                 'total' => 0,
                 'updated' => 0,
+                'reactivated' => 0,
                 'skipped' => 0,
                 'errors' => [],
             ];
@@ -109,6 +110,9 @@ class LogoPriceSyncService
 
                         if ($result['action'] === 'updated') {
                             $stats['updated']++;
+                            if (!empty($result['reactivated'])) {
+                                $stats['reactivated']++;
+                            }
                         } elseif ($result['action'] === 'error') {
                             $stats['skipped']++;
                             if (isset($result['error'])) {
@@ -228,6 +232,14 @@ class LogoPriceSyncService
                 ];
             }
 
+            // Logo'da aktif fiyatı olan ürün bizde pasifse, aktife çevir
+            $reactivated = false;
+            if (!$product->is_active) {
+                $product->update(['is_active' => true]);
+                $reactivated = true;
+                Log::info("Reactivated product {$product->code} (ID: {$product->id}) - has active price in Logo");
+            }
+
             $price = $logoPrice->price ?? 0;
             $currency = $this->currencyMap[$logoPrice->currency ?? 0] ?? 'TRY';
             $priceType = $logoPrice->price_type ?? 2; // Default to sales price
@@ -267,6 +279,7 @@ class LogoPriceSyncService
 
             return [
                 'action' => 'updated',
+                'reactivated' => $reactivated,
                 'product' => $product,
             ];
 

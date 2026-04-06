@@ -17,6 +17,7 @@ class SyncLogoProducts extends Command
                             {--limit= : Limit number of records to sync}
                             {--table= : Specific table name (optional, auto-detected if not provided)}
                             {--incremental : Sync only changed records since last sync}
+                            {--deactivate-orphans : Only run orphan deactivation (skip product sync)}
                             {--stats : Show sync statistics only}';
 
     /**
@@ -48,6 +49,12 @@ class SyncLogoProducts extends Command
         }
 
         $firmNo = (int) ($this->option('firm') ?? config('services.logo.firm_no', 1));
+
+        // Run only orphan deactivation
+        if ($this->option('deactivate-orphans')) {
+            return $this->runOrphanDeactivation($firmNo);
+        }
+
         $limit = $this->option('limit') ? (int) $this->option('limit') : null;
         $tableName = $this->option('table');
         $incrementalSync = $this->option('incremental');
@@ -110,16 +117,22 @@ class SyncLogoProducts extends Command
         $this->newLine();
 
         // Display statistics
-        $this->table(
-            ['Metric', 'Count'],
-            [
-                ['Total Processed', $stats['total']],
-                ['Created', $stats['created']],
-                ['Updated', $stats['updated']],
-                ['Skipped', $stats['skipped']],
-                ['Errors', count($stats['errors'])],
-            ]
-        );
+        $rows = [
+            ['Total Processed', $stats['total']],
+            ['Created', $stats['created']],
+            ['Updated', $stats['updated']],
+            ['Skipped', $stats['skipped']],
+            ['Errors', count($stats['errors'])],
+        ];
+
+        if (isset($stats['deactivated'])) {
+            $rows[] = ['Deactivated (orphans)', $stats['deactivated']];
+        }
+        if (isset($stats['reactivated'])) {
+            $rows[] = ['Reactivated', $stats['reactivated']];
+        }
+
+        $this->table(['Metric', 'Count'], $rows);
 
         if (!empty($stats['errors'])) {
             $this->newLine();
@@ -131,6 +144,41 @@ class SyncLogoProducts extends Command
 
         $this->newLine();
         $this->info('📊 Run with --stats to see overall statistics');
+
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Run orphan product deactivation only
+     */
+    protected function runOrphanDeactivation(int $firmNo): int
+    {
+        $this->info("Starting orphan product deactivation for firm {$firmNo}...");
+        $this->newLine();
+
+        $result = $this->syncService->deactivateOrphanProducts($firmNo, null, function ($info) {
+            if ($info['type'] === 'orphan_check_start') {
+                $this->info("Checking {$info['total']} products against Logo...");
+            } elseif ($info['type'] === 'orphan_check_done') {
+                $this->newLine();
+                $this->info("Deactivated: {$info['deactivated']}");
+                $this->info("Reactivated: {$info['reactivated']}");
+            }
+        });
+
+        if (!$result['success']) {
+            $this->error('Failed: ' . ($result['error'] ?? 'Unknown error'));
+            return Command::FAILURE;
+        }
+
+        $this->newLine();
+        $this->table(
+            ['Metric', 'Count'],
+            [
+                ['Deactivated (not in Logo)', $result['deactivated']],
+                ['Reactivated (back in Logo)', $result['reactivated']],
+            ]
+        );
 
         return Command::SUCCESS;
     }

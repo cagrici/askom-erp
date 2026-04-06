@@ -172,6 +172,13 @@ class LogoProductSyncService
 
             Log::info('Logo product sync completed', $stats);
 
+            // After full sync, deactivate products not found in Logo
+            if (!$incrementalSync && !$limit) {
+                $deactivateResult = $this->deactivateOrphanProducts($firmNo, $tableName, $progressCallback);
+                $stats['deactivated'] = $deactivateResult['deactivated'] ?? 0;
+                $stats['reactivated'] = $deactivateResult['reactivated'] ?? 0;
+            }
+
             return [
                 'success' => true,
                 'stats' => $stats,
@@ -1131,6 +1138,114 @@ class LogoProductSyncService
             return [
                 'success' => false,
                 'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Deactivate products that exist in our system but not in Logo's current period.
+     * Reactivate products that were previously deactivated but now exist in Logo.
+     * This handles year-end transfers where Logo doesn't carry over inactive/unused products.
+     */
+    public function deactivateOrphanProducts(?int $firmNo = null, ?string $tableName = null, ?callable $progressCallback = null): array
+    {
+        $firmNo = $firmNo ?? LogoService::getDefaultFirmNo();
+
+        try {
+            if (!$tableName) {
+                $tableName = $this->findProductTable($firmNo);
+                if (!$tableName) {
+                    Log::warning("Cannot deactivate orphans: product table not found for firm {$firmNo}");
+                    return ['success' => false, 'error' => "Product table not found"];
+                }
+            }
+
+            Log::info("Starting orphan product deactivation check for firm {$firmNo}, table {$tableName}");
+
+            $deactivated = 0;
+            $reactivated = 0;
+            $pageSize = 2000;
+            $page = 0;
+            $totalProducts = Product::whereNotNull('logo_id')->where('logo_id', '>', 0)->count();
+
+            if ($progressCallback) {
+                $progressCallback(['type' => 'orphan_check_start', 'total' => $totalProducts]);
+            }
+
+            while (true) {
+                $products = Product::whereNotNull('logo_id')
+                    ->where('logo_id', '>', 0)
+                    ->orderBy('id')
+                    ->skip($page * $pageSize)
+                    ->take($pageSize)
+                    ->get(['id', 'logo_id', 'is_active']);
+
+                if ($products->isEmpty()) {
+                    break;
+                }
+
+                $logoIds = $products->pluck('logo_id')->toArray();
+                $placeholders = implode(',', $logoIds);
+
+                // Check which logo_ids exist in Logo's current period
+                $existingInLogo = collect(
+                    DB::connection($this->connection)
+                        ->select("SELECT LOGICALREF FROM [{$tableName}] WHERE LOGICALREF IN ({$placeholders})")
+                )->pluck('LOGICALREF')->flip();
+
+                $toDeactivate = [];
+                $toReactivate = [];
+
+                foreach ($products as $product) {
+                    $existsInLogo = isset($existingInLogo[$product->logo_id]);
+
+                    if (!$existsInLogo && $product->is_active) {
+                        $toDeactivate[] = $product->id;
+                    } elseif ($existsInLogo && !$product->is_active) {
+                        $toReactivate[] = $product->id;
+                    }
+                }
+
+                if (!empty($toDeactivate)) {
+                    Product::whereIn('id', $toDeactivate)->update(['is_active' => false]);
+                    $deactivated += count($toDeactivate);
+                }
+
+                if (!empty($toReactivate)) {
+                    Product::whereIn('id', $toReactivate)->update(['is_active' => true]);
+                    $reactivated += count($toReactivate);
+                }
+
+                $page++;
+
+                if ($page % 5 === 0) {
+                    Log::info("Orphan check progress: page {$page}, deactivated={$deactivated}, reactivated={$reactivated}");
+                }
+            }
+
+            Log::info("Orphan deactivation completed: deactivated={$deactivated}, reactivated={$reactivated}");
+
+            if ($progressCallback) {
+                $progressCallback([
+                    'type' => 'orphan_check_done',
+                    'deactivated' => $deactivated,
+                    'reactivated' => $reactivated,
+                ]);
+            }
+
+            return [
+                'success' => true,
+                'deactivated' => $deactivated,
+                'reactivated' => $reactivated,
+            ];
+
+        } catch (Exception $e) {
+            Log::error("Orphan deactivation error: " . $e->getMessage());
+            return [
+                'success' => false,
+                'error' => $e->getMessage(),
+                'deactivated' => 0,
+                'reactivated' => 0,
             ];
         }
     }
